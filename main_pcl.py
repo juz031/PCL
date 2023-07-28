@@ -96,11 +96,11 @@ parser.add_argument('--aug-plus', action='store_true',
 parser.add_argument('--cos', action='store_true',
                     help='use cosine lr schedule')
 
-parser.add_argument('--num-cluster', default='25000,50000,100000', type=str, 
+parser.add_argument('--num-cluster', default='400, 500, 600', type=str, 
                     help='number of clusters')
 parser.add_argument('--warmup-epoch', default=20, type=int,
                     help='number of warm-up epochs to only train with InfoNCE loss')
-parser.add_argument('--exp-dir', default='experiment_pcl', type=str,
+parser.add_argument('--exp-dir', default='/user_data/junruz/experiment_pcl', type=str,
                     help='experiment directory')
 
 def main():
@@ -227,7 +227,8 @@ def main_worker(gpu, ngpus_per_node, args):
     cudnn.benchmark = True
 
     # Data loading code
-    traindir = os.path.join(args.data, 'train')
+    traindir = os.path.join(args.data, 'imagenette2', 'train')
+    evaldir = os.path.join(args.data, 'imagenette_masks', 'train')
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     
@@ -267,7 +268,7 @@ def main_worker(gpu, ngpus_per_node, args):
         traindir,
         pcl.loader.TwoCropsTransform(transforms.Compose(augmentation)))
     eval_dataset = pcl.loader.ImageFolderInstance(
-        traindir,
+        evaldir,
         eval_augmentation)
     
     if args.distributed:
@@ -283,7 +284,7 @@ def main_worker(gpu, ngpus_per_node, args):
     
     # dataloader for center-cropped images, use larger batch size to increase speed
     eval_loader = torch.utils.data.DataLoader(
-        eval_dataset, batch_size=args.batch_size*5, shuffle=False,
+        eval_dataset, batch_size=args.batch_size*2, shuffle=False,
         sampler=eval_sampler, num_workers=args.workers, pin_memory=True)
     
     for epoch in range(args.start_epoch, args.epochs):
@@ -305,7 +306,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 features = features.numpy()
                 cluster_result = run_kmeans(features,args)  #run kmeans clustering on master node
                 # save the clustering result
-                # torch.save(cluster_result,os.path.join(args.exp_dir, 'clusters_%d'%epoch))  
+                torch.save(cluster_result,os.path.join(args.exp_dir, 'clusters_%d'%epoch))  
                 
             dist.barrier()  
             # broadcast clustering result

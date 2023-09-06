@@ -18,7 +18,8 @@ import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision.models as models
-import tensorboard_logger as tb_logger
+from torch.utils.tensorboard import SummaryWriter
+# import tensorboard_logger as tb_logger
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -103,7 +104,7 @@ def main():
 
     args.distributed = args.world_size > 1 or args.multiprocessing_distributed
     
-    args.tb_folder = 'Linear_eval/{}_tensorboard'.format(args.id)
+    args.tb_folder = 'Linear_eval/{}/log'.format(args.id)
     if not os.path.isdir(args.tb_folder):
         os.makedirs(args.tb_folder)
         
@@ -153,10 +154,15 @@ def main_worker(gpu, ngpus_per_node, args):
     model.fc.weight.data.normal_(mean=0.0, std=0.01)
     model.fc.bias.data.zero_()
     
+    # if args.gpu==0:
+    #     logger = tb_logger.Logger(logdir=args.tb_folder, flush_secs=2)
+    # else:
+    #     logger = None
+
     if args.gpu==0:
-        logger = tb_logger.Logger(logdir=args.tb_folder, flush_secs=2)
+        writer = SummaryWriter(args.tb_folder)
     else:
-        logger = None
+        writer = None
         
     # load from pre-trained, before DistributedDataParallel constructor
     if args.pretrained:
@@ -288,18 +294,22 @@ def main_worker(gpu, ngpus_per_node, args):
         train(train_loader, model, criterion, optimizer, epoch, args)
 
         # evaluate on validation set
-        acc1 = validate(val_loader, model, criterion, args, logger, epoch)
+        acc1 = validate(val_loader, model, criterion, args, writer, epoch)
 
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
-            save_checkpoint({
-                'epoch': epoch + 1,
-                'arch': args.arch,
-                'state_dict': model.state_dict(),
-                'optimizer' : optimizer.state_dict(),
-            })
+            if (epoch+1)%25==0:
+                save_checkpoint({
+                    'epoch': epoch + 1,
+                    'arch': args.arch,
+                    'state_dict': model.state_dict(),
+                    'optimizer' : optimizer.state_dict(),
+                    'state_dict_unwrapped': model.module.state_dict()
+                }, filename='Linear_eval/{}/checkpoint_{:04d}.pth.tar'.format(args.id,epoch))
             if epoch == args.start_epoch:
                 sanity_check(model.state_dict(), args.pretrained)
+    
+    writer.close()
 
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
@@ -354,7 +364,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
             progress.display(i)
 
 
-def validate(val_loader, model, criterion, args, logger, epoch):
+def validate(val_loader, model, criterion, args, writer, epoch):
     batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
@@ -394,9 +404,14 @@ def validate(val_loader, model, criterion, args, logger, epoch):
         # TODO: this should also be done with the ProgressMeter
         print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
               .format(top1=top1, top5=top5))
+    # if args.gpu==0:    
+    #     logger.log_value('test_acc', top1.avg, epoch)
+    #     logger.log_value('test_acc5', top5.avg, epoch)
+
     if args.gpu==0:    
-        logger.log_value('test_acc', top1.avg, epoch)
-        logger.log_value('test_acc5', top5.avg, epoch)
+        writer.add_scalar('test_acc', top1.avg, epoch)
+        writer.add_scalar('test_acc5', top5.avg, epoch)
+
     return top1.avg
 
 
@@ -485,11 +500,11 @@ def accuracy(output, target, topk=(1,)):
 
         _, pred = output.topk(maxk, 1, True, True)
         pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
+        correct = pred.eq(target.reshape(1, -1).expand_as(pred))
 
         res = []
         for k in topk:
-            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
 

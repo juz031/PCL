@@ -96,7 +96,7 @@ parser.add_argument('--aug-plus', action='store_true',
 parser.add_argument('--cos', action='store_true',
                     help='use cosine lr schedule')
 
-parser.add_argument('--num-cluster', default='400, 500, 600', type=str, 
+parser.add_argument('--num-cluster', default='200, 250, 300', type=str, 
                     help='number of clusters')
 parser.add_argument('--warmup-epoch', default=20, type=int,
                     help='number of warm-up epochs to only train with InfoNCE loss')
@@ -169,7 +169,7 @@ def main_worker(gpu, ngpus_per_node, args):
     model = pcl.builder.MoCo(
         models.__dict__[args.arch],
         args.low_dim, args.pcl_r, args.moco_m, args.temperature, args.mlp)
-    print(model)
+    # print(model)
 
     if args.distributed:
         # For multiprocessing distributed, DistributedDataParallel constructor
@@ -227,8 +227,23 @@ def main_worker(gpu, ngpus_per_node, args):
     cudnn.benchmark = True
 
     # Data loading code
-    traindir = os.path.join(args.data, 'imagenette2', 'train')
-    evaldir = os.path.join(args.data, 'imagenette_masks', 'train')
+    # for the whole dataset
+    # traindir = os.path.join(args.data, 'imagenette2', 'train')
+    # evaldir = os.path.join(args.data, 'imagenette_masks', 'train')
+
+    # for the subset
+    traindir = os.path.join(args.data, 'train')
+
+    # # shape clustering
+    # evaldir = traindir.replace('subset', 'subset_masks')
+
+    # image clustering
+    evaldir = traindir
+    
+    print(traindir)
+    print(evaldir)
+
+
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
     
@@ -267,6 +282,7 @@ def main_worker(gpu, ngpus_per_node, args):
     train_dataset = pcl.loader.ImageFolderInstance(
         traindir,
         pcl.loader.TwoCropsTransform(transforms.Compose(augmentation)))
+    
     eval_dataset = pcl.loader.ImageFolderInstance(
         evaldir,
         eval_augmentation)
@@ -284,7 +300,7 @@ def main_worker(gpu, ngpus_per_node, args):
     
     # dataloader for center-cropped images, use larger batch size to increase speed
     eval_loader = torch.utils.data.DataLoader(
-        eval_dataset, batch_size=args.batch_size*2, shuffle=False,
+        eval_dataset, batch_size=args.batch_size, shuffle=False,
         sampler=eval_sampler, num_workers=args.workers, pin_memory=True)
     
     for epoch in range(args.start_epoch, args.epochs):
@@ -292,7 +308,10 @@ def main_worker(gpu, ngpus_per_node, args):
         cluster_result = None
         if epoch>=args.warmup_epoch:
             # compute momentum features for center-cropped images
-            features = compute_features(eval_loader, model, args)         
+            features = compute_features(eval_loader, model, args)
+            # if (epoch+1)%10==0:
+            #     torch.save(features,os.path.join(args.exp_dir, 'features_%d'%epoch)) 
+
             
             # placeholder for clustering result
             cluster_result = {'im2cluster':[],'centroids':[],'density':[]}
@@ -306,7 +325,8 @@ def main_worker(gpu, ngpus_per_node, args):
                 features = features.numpy()
                 cluster_result = run_kmeans(features,args)  #run kmeans clustering on master node
                 # save the clustering result
-                torch.save(cluster_result,os.path.join(args.exp_dir, 'clusters_%d'%epoch))  
+                if (epoch+1)%10==0:
+                    torch.save(cluster_result,os.path.join(args.exp_dir, 'clusters_%d'%epoch))  
                 
             dist.barrier()  
             # broadcast clustering result
@@ -320,14 +340,17 @@ def main_worker(gpu, ngpus_per_node, args):
 
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch, args, cluster_result)
+        # print(traindir)
+        # print(evaldir)
 
-        if (epoch+1)%5==0 and (not args.multiprocessing_distributed or (args.multiprocessing_distributed
+        if (epoch+1)%10==0 and (not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0)):
             save_checkpoint({
                 'epoch': epoch + 1,
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
                 'optimizer' : optimizer.state_dict(),
+                'state_dict_unwrapped': model.module.state_dict()
             }, is_best=False, filename='{}/checkpoint_{:04d}.pth.tar'.format(args.exp_dir,epoch))
 
 
@@ -423,7 +446,7 @@ def run_kmeans(x, args):
         clus.nredo = 5
         clus.seed = seed
         clus.max_points_per_centroid = 1000
-        clus.min_points_per_centroid = 10
+        clus.min_points_per_centroid = 4
 
         res = faiss.StandardGpuResources()
         cfg = faiss.GpuIndexFlatConfig()

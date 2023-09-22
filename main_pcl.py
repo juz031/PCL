@@ -96,15 +96,25 @@ parser.add_argument('--aug-plus', action='store_true',
 parser.add_argument('--cos', action='store_true',
                     help='use cosine lr schedule')
 
-parser.add_argument('--num-cluster', default='200, 250, 300', type=str, 
+parser.add_argument('--num-cluster', default='2000, 4000, 6000', type=str, 
                     help='number of clusters')
 parser.add_argument('--warmup-epoch', default=20, type=int,
                     help='number of warm-up epochs to only train with InfoNCE loss')
 parser.add_argument('--exp-dir', default='/user_data/junruz/experiment_pcl', type=str,
                     help='experiment directory')
+parser.add_argument('--shape', action='store_true',
+                    help='use shape to cluster')
 
 def main():
     args = parser.parse_args()
+    print('arch: {}'.format(args.arch))
+    print('lr: {}'.format(args.lr))
+    print('schedule: {}'.format(args.schedule))
+    print('batch_size: {}'.format(args.batch_size))
+    print('pcl_r: {}'.format(args.pcl_r))
+    print('low dim: {}'.format(args.low_dim))
+    print('epochs: {}'.format(args.epochs))
+    print('num of clusters: {}'.format(args.num_cluster))
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -232,13 +242,18 @@ def main_worker(gpu, ngpus_per_node, args):
     # evaldir = os.path.join(args.data, 'imagenette_masks', 'train')
 
     # for the subset
-    traindir = os.path.join(args.data, 'train')
+    # traindir = os.path.join(args.data, 'train')
 
     # # shape clustering
     # evaldir = traindir.replace('subset', 'subset_masks')
 
     # image clustering
-    evaldir = traindir
+    # evaldir = traindir
+    traindir = os.path.join(args.data, 'train')
+    if args.shape:
+        evaldir = os.path.join(args.data, 'shape')
+    else:
+        evaldir = os.path.join(args.data, 'train')
     
     print(traindir)
     print(evaldir)
@@ -300,7 +315,7 @@ def main_worker(gpu, ngpus_per_node, args):
     
     # dataloader for center-cropped images, use larger batch size to increase speed
     eval_loader = torch.utils.data.DataLoader(
-        eval_dataset, batch_size=args.batch_size, shuffle=False,
+        eval_dataset, batch_size=args.batch_size * 5, shuffle=False,
         sampler=eval_sampler, num_workers=args.workers, pin_memory=True)
     
     for epoch in range(args.start_epoch, args.epochs):
@@ -343,7 +358,7 @@ def main_worker(gpu, ngpus_per_node, args):
         # print(traindir)
         # print(evaldir)
 
-        if (epoch+1)%10==0 and (not args.multiprocessing_distributed or (args.multiprocessing_distributed
+        if (epoch+1)%5==0 and (not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0)):
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -352,6 +367,16 @@ def main_worker(gpu, ngpus_per_node, args):
                 'optimizer' : optimizer.state_dict(),
                 'state_dict_unwrapped': model.module.state_dict()
             }, is_best=False, filename='{}/checkpoint_{:04d}.pth.tar'.format(args.exp_dir,epoch))
+    
+    print('arch: {}'.format(args.arch))
+    print('lr: {}'.format(args.lr))
+    print('schedule: {}'.format(args.schedule))
+    print('batch_size: {}'.format(args.batch_size))
+    print('pcl_r: {}'.format(args.pcl_r))
+    print('epochs: {}'.format(args.epochs))
+    print('num of clusters: {}'.format(args.num_cluster))
+    print('train dir: {}'.format(traindir))
+    print('eval dir: {}'.format(evaldir))
 
 
 def train(train_loader, model, criterion, optimizer, epoch, args, cluster_result=None):
@@ -446,7 +471,7 @@ def run_kmeans(x, args):
         clus.nredo = 5
         clus.seed = seed
         clus.max_points_per_centroid = 1000
-        clus.min_points_per_centroid = 4
+        clus.min_points_per_centroid = 10
 
         res = faiss.StandardGpuResources()
         cfg = faiss.GpuIndexFlatConfig()

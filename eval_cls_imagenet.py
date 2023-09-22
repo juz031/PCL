@@ -84,6 +84,12 @@ parser.add_argument('--id', type=str, default='')
 
 def main():
     args = parser.parse_args()
+    print('arch: {}'.format(args.arch))
+    print('lr: {}'.format(args.lr))
+    print('schedule: {}'.format(args.schedule))
+    print('batch_size: {}'.format(args.batch_size))
+    print('epochs: {}'.format(args.epochs))
+    print('id; {}'.format(args.id))
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -104,9 +110,9 @@ def main():
 
     args.distributed = args.world_size > 1 or args.multiprocessing_distributed
     
-    args.tb_folder = 'Linear_eval/{}/log'.format(args.id)
+    args.tb_folder = '/ocean/projects/cis230063p/jzhao7/pcl_linear_eval/{}/log'.format(args.id)
     if not os.path.isdir(args.tb_folder):
-        os.makedirs(args.tb_folder)
+        os.makedirs(args.tb_folder, exist_ok=True)
         
     ngpus_per_node = torch.cuda.device_count()
     if args.multiprocessing_distributed:
@@ -144,7 +150,9 @@ def main_worker(gpu, ngpus_per_node, args):
                                 world_size=args.world_size, rank=args.rank)
     # create model
     print("=> creating model '{}'".format(args.arch))
-    model = models.__dict__[args.arch]()
+    model = models.__dict__[args.arch](num_classes=100)
+    print(model)
+    
 
     # freeze all layers but the last fc
     for name, param in model.named_parameters():
@@ -305,11 +313,16 @@ def main_worker(gpu, ngpus_per_node, args):
                     'state_dict': model.state_dict(),
                     'optimizer' : optimizer.state_dict(),
                     'state_dict_unwrapped': model.module.state_dict()
-                }, filename='Linear_eval/{}/checkpoint_{:04d}.pth.tar'.format(args.id,epoch))
+                }, filename='/ocean/projects/cis230063p/jzhao7/pcl_linear_eval/{}/checkpoint_{:04d}.pth.tar'.format(args.id,epoch))
             if epoch == args.start_epoch:
                 sanity_check(model.state_dict(), args.pretrained)
     
-    writer.close()
+    print('arch: {}'.format(args.arch))
+    print('lr: {}'.format(args.lr))
+    print('schedule: {}'.format(args.schedule))
+    print('batch_size: {}'.format(args.batch_size))
+    print('epochs: {}'.format(args.epochs))
+    print('id; {}'.format(args.id))
 
 
 def train(train_loader, model, criterion, optimizer, epoch, args):

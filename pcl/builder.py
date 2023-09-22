@@ -181,7 +181,8 @@ class MoCo(nn.Module):
                 neg_proto_id = set(all_proto_id)-set(pos_proto_id.tolist())
                 # print('len of neg ids:')
                 # print(len(neg_proto_id))
-                neg_proto_id = sample(neg_proto_id,self.r) #sample r negative prototypes 
+                neg_proto_id = sample(neg_proto_id,self.r) #sample r negative prototypes
+                # neg_proto_id = list(neg_proto_id)
                 neg_prototypes = prototypes[neg_proto_id]    
 
                 proto_selected = torch.cat([pos_prototypes,neg_prototypes],dim=0)

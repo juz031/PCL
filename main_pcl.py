@@ -26,6 +26,7 @@ import torchvision.models as models
 import pcl.loader
 import pcl.builder
 
+
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
@@ -38,7 +39,7 @@ parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50',
                     help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet50)')
-parser.add_argument('-j', '--workers', default=32, type=int, metavar='N',
+parser.add_argument('-j', '--workers', default=16, type=int, metavar='N',
                     help='number of data loading workers (default: 32)')
 parser.add_argument('--epochs', default=200, type=int, metavar='N',
                     help='number of total epochs to run')
@@ -58,7 +59,7 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
 parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)',
                     dest='weight_decay')
-parser.add_argument('-p', '--print-freq', default=100, type=int,
+parser.add_argument('-p', '--print-freq', default=1000, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
@@ -96,15 +97,25 @@ parser.add_argument('--aug-plus', action='store_true',
 parser.add_argument('--cos', action='store_true',
                     help='use cosine lr schedule')
 
-parser.add_argument('--num-cluster', default='200, 250, 300', type=str, 
+parser.add_argument('--num-cluster', default='25000, 50000', type=str, 
                     help='number of clusters')
 parser.add_argument('--warmup-epoch', default=20, type=int,
                     help='number of warm-up epochs to only train with InfoNCE loss')
 parser.add_argument('--exp-dir', default='/user_data/junruz/experiment_pcl', type=str,
                     help='experiment directory')
+parser.add_argument('--mode', default='pcl', type=str,
+                    help='choose one from: pcl, shape')
+
 
 def main():
     args = parser.parse_args()
+    print('arch: {}'.format(args.arch))
+    print('lr: {}'.format(args.lr))
+    print('schedule: {}'.format(args.schedule))
+    print('batch_size: {}'.format(args.batch_size))
+    print('pcl_r: {}'.format(args.pcl_r))
+    print('epochs: {}'.format(args.epochs))
+    print('num of clusters: {}'.format(args.num_cluster))
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -228,17 +239,13 @@ def main_worker(gpu, ngpus_per_node, args):
 
     # Data loading code
     # for the whole dataset
-    # traindir = os.path.join(args.data, 'imagenette2', 'train')
-    # evaldir = os.path.join(args.data, 'imagenette_masks', 'train')
+    if args.mode == 'pcl':
+        traindir = os.path.join(args.data, 'train')
+        evaldir = os.path.join(args.data, 'train')
+    elif args.mode == 'shape':
+        traindir = os.path.join(args.data, 'train')
+        evaldir = os.path.join(args.data, 'shape')
 
-    # for the subset
-    traindir = os.path.join(args.data, 'train')
-
-    # # shape clustering
-    # evaldir = traindir.replace('subset', 'subset_masks')
-
-    # image clustering
-    evaldir = traindir
     
     print(traindir)
     print(evaldir)
@@ -277,11 +284,21 @@ def main_worker(gpu, ngpus_per_node, args):
         transforms.CenterCrop(224),
         transforms.ToTensor(),
         normalize
-        ])    
-       
+        ])
+
+    shape_augmentation = [
+            transforms.RandomResizedCrop(224, scale=(0.2, 1.)),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.RandomApply([pcl.loader.GaussianBlur([.1, 2.])], p=0.5),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            normalize
+        ]
+
     train_dataset = pcl.loader.ImageFolderInstance(
         traindir,
         pcl.loader.TwoCropsTransform(transforms.Compose(augmentation)))
+    
     
     eval_dataset = pcl.loader.ImageFolderInstance(
         evaldir,
@@ -323,7 +340,7 @@ def main_worker(gpu, ngpus_per_node, args):
             if args.gpu == 0:
                 features[torch.norm(features,dim=1)>1.5] /= 2 #account for the few samples that are computed twice  
                 features = features.numpy()
-                cluster_result = run_kmeans(features,args)  #run kmeans clustering on master node
+                cluster_result = run_kmeans_cpu(features,args)  #run kmeans clustering on master node
                 # save the clustering result
                 if (epoch+1)%10==0:
                     torch.save(cluster_result,os.path.join(args.exp_dir, 'clusters_%d'%epoch))  
@@ -340,10 +357,8 @@ def main_worker(gpu, ngpus_per_node, args):
 
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch, args, cluster_result)
-        # print(traindir)
-        # print(evaldir)
 
-        if (epoch+1)%10==0 and (not args.multiprocessing_distributed or (args.multiprocessing_distributed
+        if (epoch+1)%20==0 and (not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0)):
             save_checkpoint({
                 'epoch': epoch + 1,
@@ -352,7 +367,14 @@ def main_worker(gpu, ngpus_per_node, args):
                 'optimizer' : optimizer.state_dict(),
                 'state_dict_unwrapped': model.module.state_dict()
             }, is_best=False, filename='{}/checkpoint_{:04d}.pth.tar'.format(args.exp_dir,epoch))
-
+    
+    print('arch: {}'.format(args.arch))
+    print('lr: {}'.format(args.lr))
+    print('schedule: {}'.format(args.schedule))
+    print('batch_size: {}'.format(args.batch_size))
+    print('pcl_r: {}'.format(args.pcl_r))
+    print('epochs: {}'.format(args.epochs))
+    print('num of clusters: {}'.format(args.num_cluster))
 
 def train(train_loader, model, criterion, optimizer, epoch, args, cluster_result=None):
     batch_time = AverageMeter('Time', ':6.3f')
@@ -426,7 +448,78 @@ def compute_features(eval_loader, model, args):
     dist.all_reduce(features, op=dist.ReduceOp.SUM)     
     return features.cpu()
 
-    
+def run_kmeans_cpu(x, args):
+    """
+    Args:
+        x: data to be clustered
+    """
+
+    print('performing kmeans clustering')
+    results = {'im2cluster': [], 'centroids': [], 'density': []}
+
+    for seed, num_cluster in enumerate(args.num_cluster):
+        # intialize faiss clustering parameters
+        d = x.shape[1]
+        k = int(num_cluster)
+        clus = faiss.Clustering(d, k)
+        clus.verbose = True
+        clus.niter = 20
+        clus.nredo = 5
+        clus.seed = seed
+        clus.max_points_per_centroid = 1000
+        clus.min_points_per_centroid = 10
+
+        # res = faiss.StandardGpuResources()
+        # cfg = faiss.GpuIndexFlatConfig()
+        # cfg.useFloat16 = False
+        # cfg.device = 0
+        # index = faiss.GpuIndexFlatL2(res, d, cfg)
+        index = faiss.IndexFlatL2(d)
+
+        # clus.train(x, index)
+        clus.train(x, index)
+
+        D, I = index.search(x, 1)  # for each sample, find cluster distance and assignments
+        im2cluster = [int(n[0]) for n in I]
+
+        # get cluster centroids
+        centroids = faiss.vector_to_array(clus.centroids).reshape(k, d)
+
+        # sample-to-centroid distances for each cluster
+        Dcluster = [[] for c in range(k)]
+        for im, i in enumerate(im2cluster):
+            Dcluster[i].append(D[im][0])
+
+        # concentration estimation (phi)
+        density = np.zeros(k)
+        for i, dist in enumerate(Dcluster):
+            if len(dist) > 1:
+                d = (np.asarray(dist) ** 0.5).mean() / np.log(len(dist) + 10)
+                density[i] = d
+
+                # if cluster only has one point, use the max to estimate its concentration
+        dmax = density.max()
+        for i, dist in enumerate(Dcluster):
+            if len(dist) <= 1:
+                density[i] = dmax
+
+        density = density.clip(np.percentile(density, 10),
+                               np.percentile(density, 90))  # clamp extreme values for stability
+        density = args.temperature * density / density.mean()  # scale the mean to temperature
+
+        # convert to cuda Tensors for broadcast
+        centroids = torch.Tensor(centroids).cuda()
+        centroids = nn.functional.normalize(centroids, p=2, dim=1)
+
+        im2cluster = torch.LongTensor(im2cluster).cuda()
+        density = torch.Tensor(density).cuda()
+
+        results['centroids'].append(centroids)
+        results['density'].append(density)
+        results['im2cluster'].append(im2cluster)
+
+    return results
+
 def run_kmeans(x, args):
     """
     Args:
@@ -446,7 +539,7 @@ def run_kmeans(x, args):
         clus.nredo = 5
         clus.seed = seed
         clus.max_points_per_centroid = 1000
-        clus.min_points_per_centroid = 4
+        clus.min_points_per_centroid = 10
 
         res = faiss.StandardGpuResources()
         cfg = faiss.GpuIndexFlatConfig()

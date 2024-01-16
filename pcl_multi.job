@@ -1,0 +1,16 @@
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH --job-name=Shape
+#SBATCH --time=10-00:00:00
+#SBATCH -p gpu
+#SBATCH --gres=gpu:2
+#SBATCH --nodelist=mind-1-34
+#SBATCH --mem=32G
+#SBATCH --cpus-per-gpu=12
+
+
+echo "SLURM_JOBID: " $SLURM_JOBID
+module load anaconda3
+source activate juz01
+cd PCL/
+python main_pcl.py --mode shape --workers 8 -a resnet50 --lr 0.3 --batch-size 256  --low-dim 128 --epochs 100 --schedule 60 80 --temperature 0.2 --pcl-r 16384 --mlp --aug-plus --dist-url 'tcp://localhost:10001' --multiprocessing-distributed --world-size 1 --rank 0 --exp-dir /user_data/junruz/pcl_multicards/pretrain/shape_IN1k_200e --resume /user_data/junruz/pcl_multicards/pretrain/shape_IN1k_200e/checkpoint_0019.pth.tar /user_data/junruz/imagenet

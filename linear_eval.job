@@ -1,0 +1,15 @@
+#!/bin/bash
+#SBATCH -N 1
+#SBATCH --job-name=Shape
+#SBATCH --time=10-00:00:00
+#SBATCH -p gpu
+#SBATCH --gres=gpu:2
+#SBATCH --nodelist=mind-1-34
+#SBATCH --mem=32G
+#SBATCH --cpus-per-gpu=12
+
+echo "SLURM_JOBID: " $SLURM_JOBID
+module load anaconda3
+source activate juz01
+cd PCL/
+python eval_cls_imagenet.py --workers 8 --pretrained /home/junruz/PCL/all_data/experiment_pcl_200/checkpoint_0199.pth.tar -a resnet50 --epochs 100 --lr 0.3 --batch-size 256 --id eval_shape_IN1k --dist-url 'tcp://localhost:10001' --multiprocessing-distributed --world-size 1 --rank 0 /user_data/junruz/imagenet

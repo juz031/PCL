@@ -104,9 +104,9 @@ def main():
 
     args.distributed = args.world_size > 1 or args.multiprocessing_distributed
     
-    args.tb_folder = 'Linear_eval/{}/log'.format(args.id)
+    args.tb_folder = './linear_eval/{}/log'.format(args.id)
     if not os.path.isdir(args.tb_folder):
-        os.makedirs(args.tb_folder)
+        os.makedirs(args.tb_folder, exist_ok=True)
         
     ngpus_per_node = torch.cuda.device_count()
     if args.multiprocessing_distributed:
@@ -145,6 +145,7 @@ def main_worker(gpu, ngpus_per_node, args):
     # create model
     print("=> creating model '{}'".format(args.arch))
     model = models.__dict__[args.arch]()
+    # print(model)
 
     # freeze all layers but the last fc
     for name, param in model.named_parameters():
@@ -305,11 +306,11 @@ def main_worker(gpu, ngpus_per_node, args):
                     'state_dict': model.state_dict(),
                     'optimizer' : optimizer.state_dict(),
                     'state_dict_unwrapped': model.module.state_dict()
-                }, filename='Linear_eval/{}/checkpoint_{:04d}.pth.tar'.format(args.id,epoch))
+                }, filename='./linear_eval/{}/checkpoint_{:04d}.pth.tar'.format(args.id,epoch))
             if epoch == args.start_epoch:
                 sanity_check(model.state_dict(), args.pretrained)
     
-    writer.close()
+    # writer.close()
 
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
